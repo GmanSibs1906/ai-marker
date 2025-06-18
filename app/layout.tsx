@@ -1,5 +1,6 @@
 import './globals.css'
 import { Inter } from 'next/font/google'
+import Image from 'next/image'
 
 const inter = Inter({ subsets: ['latin'] })
 
@@ -23,9 +24,11 @@ export default function RootLayout({
               <div className="flex justify-between items-center py-6">
                 <div className="flex items-center space-x-3">
                   <div className="w-12 h-12 bg-white/10 rounded-lg flex items-center justify-center backdrop-blur-sm p-1">
-                    <img 
+                    <Image 
                       src="/logo.png" 
                       alt="Melsoft Academy Logo" 
+                      width={48}
+                      height={48}
                       className="w-full h-full object-contain"
                     />
                   </div>
@@ -67,9 +70,11 @@ export default function RootLayout({
               <div className="flex flex-col md:flex-row justify-between items-center">
                 <div className="flex items-center space-x-2 mb-4 md:mb-0">
                   <div className="w-8 h-8 bg-white/10 rounded flex items-center justify-center p-1">
-                    <img 
+                    <Image 
                       src="/logo.png" 
                       alt="Melsoft Academy Logo" 
+                      width={32}
+                      height={32}
                       className="w-full h-full object-contain"
                     />
                   </div>

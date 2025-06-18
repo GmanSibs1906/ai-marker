@@ -124,7 +124,7 @@ export function loadPrompts(): Prompt[] {
     const stored = localStorage.getItem(PROMPTS_STORAGE_KEY);
     if (stored) {
       const parsed = JSON.parse(stored);
-      return parsed.map((p: any) => ({
+      return parsed.map((p: { id: string; name: string; type: string; content: string; createdAt: string; updatedAt: string }) => ({
         ...p,
         createdAt: new Date(p.createdAt),
         updatedAt: new Date(p.updatedAt),
@@ -212,7 +212,7 @@ export function loadMemos(): Memo[] {
     const stored = localStorage.getItem(MEMOS_STORAGE_KEY);
     if (stored) {
       const parsed = JSON.parse(stored);
-      return parsed.map((m: any) => ({
+      return parsed.map((m: { id: string; fileName: string; content: string; assessmentType: string; uploadedAt: string }) => ({
         ...m,
         uploadedAt: new Date(m.uploadedAt),
       }));

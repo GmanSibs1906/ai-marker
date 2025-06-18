@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Prompt, UploadedFile, MarkingResult, Memo } from '../lib/types';
 
 interface MarkingInterfaceProps {
@@ -36,7 +36,7 @@ export default function MarkingInterface({
     status: 'idle',
     logs: []
   });
-  const [results, setResults] = useState<MarkingResult[]>([]);
+  // Remove unused results state
 
   const addLog = (message: string) => {
     const timestamp = new Date().toLocaleTimeString();
@@ -48,7 +48,7 @@ export default function MarkingInterface({
     }));
   };
 
-  const startMarking = async () => {
+  const startMarking = useCallback(async () => {
     if (!prompt) {
       addLog('ERROR: No prompt selected');
       return;
@@ -166,9 +166,8 @@ export default function MarkingInterface({
 
     addLog(`🎉 Marking completed! Successfully processed ${markingResults.length} files`);
     setProgress(prev => ({ ...prev, status: 'completed' }));
-    setResults(markingResults);
     onMarkingComplete(markingResults);
-  };
+  }, [prompt, memo, files, assessmentType, onMarkingComplete, onMarkingStart, addLog]);
 
   useEffect(() => {
     // Auto-start marking when component mounts
@@ -177,7 +176,7 @@ export default function MarkingInterface({
         startMarking();
       }, 500); // Small delay to show the interface first
     }
-  }, []);
+  }, [files.length, prompt, startMarking]);
 
   return (
     <div className="space-y-6">

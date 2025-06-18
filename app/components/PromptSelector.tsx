@@ -27,7 +27,7 @@ export default function PromptSelector({
     if (!selectedPrompt && loadedPrompts.length > 0) {
       onPromptSelect(loadedPrompts[0]);
     }
-  }, [assessmentType]);
+  }, [assessmentType, selectedPrompt, onPromptSelect]);
 
   if (!isLoaded) {
     return (

@@ -42,14 +42,14 @@ export default function Home() {
   const goToNextStep = () => {
     const currentIndex = getCurrentStepIndex();
     if (currentIndex < steps.length - 1 && canProceed()) {
-      setCurrentStep(steps[currentIndex + 1].id as any);
+      setCurrentStep(steps[currentIndex + 1].id as 'setup' | 'upload' | 'marking' | 'results');
     }
   };
 
   const goToPreviousStep = () => {
     const currentIndex = getCurrentStepIndex();
     if (currentIndex > 0) {
-      setCurrentStep(steps[currentIndex - 1].id as any);
+      setCurrentStep(steps[currentIndex - 1].id as 'setup' | 'upload' | 'marking' | 'results');
     }
   };
 

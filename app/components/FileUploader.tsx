@@ -40,7 +40,7 @@ export default function FileUploader({ assessmentType, onFilesUploaded, uploaded
       }
 
       // Convert API response to UploadedFile format
-      const newFiles: UploadedFile[] = data.processedFiles.map((file: any) => ({
+      const newFiles: UploadedFile[] = data.processedFiles.map((file: { id: string; fileName?: string; studentName: string; assignmentTitle: string; extractedText: string; status: string; error?: string }) => ({
         id: file.id,
         file: new File([''], file.fileName || 'unknown.pdf'), // Create dummy file object
         studentName: file.studentName,
@@ -105,14 +105,6 @@ export default function FileUploader({ assessmentType, onFilesUploaded, uploaded
     onFilesUploaded(filteredFiles);
   };
 
-  const formatFileSize = (bytes: number) => {
-    if (bytes === 0) return '0 Bytes';
-    const k = 1024;
-    const sizes = ['Bytes', 'KB', 'MB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-  };
-
   return (
     <div className="space-y-4">
       {error && (
@@ -128,25 +120,26 @@ export default function FileUploader({ assessmentType, onFilesUploaded, uploaded
           <p><strong>For SINGLE STUDENT marking:</strong></p>
           <ul className="list-disc list-inside ml-4">
             <li>Upload 1 PDF file</li>
-            <li>File name format: "StudentName_AssignmentTitle.pdf"</li>
-            <li>Example: "JohnSmith_WebDevelopmentProject.pdf"</li>
+            <li>File name format: &quot;StudentName_AssignmentTitle.pdf&quot;</li>
+            <li>Example: &quot;JohnSmith_WebDevelopmentProject.pdf&quot;</li>
           </ul>
           
           <p><strong>For MULTIPLE STUDENTS marking:</strong></p>
           <ul className="list-disc list-inside ml-4">
             <li>Upload multiple PDF files at once</li>
             <li>Each file must follow naming convention</li>
-            <li>Examples: "BusisiweNgwane_CVWebpage.pdf", "JohnDoe_CyberSecurityAssessment.pdf"</li>
+            <li>Examples: &quot;BusisiweNgwane_CVWebpage.pdf&quot;, &quot;JohnDoe_CyberSecurityAssessment.pdf&quot;</li>
           </ul>
 
           <p><strong>IMPORTANT RULES:</strong></p>
-          <ul className="list-disc list-inside ml-4">
-            <li>✅ Only PDF files accepted</li>
-            <li>✅ Max file size: 10MB per file</li>
-            <li>✅ Student name and assignment title MUST be in filename</li>
-            <li>✅ Use underscores (_) to separate name and title</li>
-            <li>✅ No spaces in filenames</li>
-          </ul>
+          <div className="text-sm text-blue-800 space-y-2">
+            <p>• File name format: &quot;StudentName_AssignmentTitle.pdf&quot;</p>
+            <p>• Example: &quot;JohnSmith_WebDevelopmentProject.pdf&quot;</p>
+            <p>• Only PDF files accepted</p>
+            <p>• Max file size: 10MB per file</p>
+            <p>• Use underscores (_) to separate name and title</p>
+            <p>• No spaces in filenames</p>
+          </div>
         </div>
       </div>
 

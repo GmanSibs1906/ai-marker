@@ -33,7 +33,7 @@ export async function markDocument(
   
   Always maintain professional, constructive tone and provide specific, actionable feedback.`;
 
-  let userPrompt = `${prompt}
+  const userPrompt = `${prompt}
 
 ${memo ? `MARKING MEMO/RUBRIC:
 ${memo}
