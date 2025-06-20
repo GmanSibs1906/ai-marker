@@ -85,7 +85,7 @@ function detectQuestions(content: string): Array<{
     /(?:^|\n)\s*([a-zA-Z])\s*[\.\)]\s+/gm
   ];
 
-  let foundItems: Array<{ number: string; index: number; type: string }> = [];
+  const foundItems: Array<{ number: string; index: number; type: string }> = [];
 
   patterns.forEach((pattern, patternIndex) => {
     let match;

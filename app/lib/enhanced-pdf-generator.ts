@@ -342,7 +342,7 @@ async function renderSection(
       doc.setTextColor(0, 0, 0);
       
       // Handle bold text in feedback sections
-      let content = section.content;
+      const content = section.content;
       if (content.includes('**')) {
         const parts = content.split('**');
         let currentX = margin;
@@ -469,19 +469,13 @@ async function renderTable(
   return yPosition + 10;
 }
 
-// Keep the original function for backward compatibility
-export function generateEnhancedPDF(options: PDFGenerationOptions): jsPDF {
-  // This will be a synchronous version without logo loading
-  const doc = new jsPDF();
-  // ... basic implementation without async logo loading
-  return doc;
-}
-
 export function downloadEnhancedPDF(
   options: PDFGenerationOptions,
   filename?: string
 ): void {
-  const doc = generateEnhancedPDF(options);
+  // Create a basic PDF for backward compatibility
+  const doc = new jsPDF();
+  doc.text('Basic PDF - Use downloadEnhancedPDFWithLogo for full features', 20, 20);
   const defaultFilename = `MARKED_${options.studentName}_${options.assignmentTitle}.pdf`;
   doc.save(filename || defaultFilename);
 }

@@ -6,7 +6,6 @@ import MemoUploader from './components/MemoUploader';
 import FileUploader from './components/FileUploader';
 import MarkingInterface from './components/MarkingInterface';
 import PromptSelector from './components/PromptSelector';
-import { generateBatchPDFs } from './lib/pdf-generator';
 import { downloadEnhancedPDFWithLogo } from './lib/enhanced-pdf-generator';
 
 export default function Home() {
