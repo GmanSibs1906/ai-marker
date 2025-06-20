@@ -6,7 +6,8 @@ import MemoUploader from './components/MemoUploader';
 import FileUploader from './components/FileUploader';
 import MarkingInterface from './components/MarkingInterface';
 import PromptSelector from './components/PromptSelector';
-import { generateMarkingPDF, downloadPDF, generateBatchPDFs } from './lib/pdf-generator';
+import { generateBatchPDFs } from './lib/pdf-generator';
+import { downloadEnhancedPDFWithLogo } from './lib/enhanced-pdf-generator';
 
 export default function Home() {
   const [currentStep, setCurrentStep] = useState<'setup' | 'upload' | 'marking' | 'results'>('setup');
@@ -53,19 +54,43 @@ export default function Home() {
     }
   };
 
-  const handleDownloadPDF = (result: MarkingResult) => {
+  const handleDownloadPDF = async (result: MarkingResult) => {
     try {
-      const doc = generateMarkingPDF(result, assessmentType);
-      downloadPDF(doc, `${result.studentName}_${result.assignmentTitle}`);
+      // Use enhanced PDF generator with logo for better formatting
+      await downloadEnhancedPDFWithLogo({
+        studentName: result.studentName,
+        assignmentTitle: result.assignmentTitle,
+        markingContent: result.markingContent,
+        totalMarks: result.totalMarks || 0,
+        percentage: result.percentage || 0,
+        includeLogo: true,
+        logoPath: '/logo.png',
+        institutionName: 'Melsoft Academy - AI Assessment Marker'
+      });
     } catch (error) {
       console.error('Error generating PDF:', error);
       alert('Failed to generate PDF. Please try again.');
     }
   };
 
-  const handleDownloadAllPDFs = () => {
+  const handleDownloadAllPDFs = async () => {
     try {
-      generateBatchPDFs(markingResults, assessmentType);
+      // Use the enhanced PDF generator for all files
+      for (const result of markingResults) {
+        await downloadEnhancedPDFWithLogo({
+          studentName: result.studentName,
+          assignmentTitle: result.assignmentTitle,
+          markingContent: result.markingContent,
+          totalMarks: result.totalMarks || 0,
+          percentage: result.percentage || 0,
+          includeLogo: true,
+          logoPath: '/logo.png',
+          institutionName: 'Melsoft Academy - AI Assessment Marker'
+        });
+        
+        // Small delay between downloads to prevent browser blocking
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
     } catch (error) {
       console.error('Error generating batch PDFs:', error);
       alert('Failed to generate PDFs. Please try again.');

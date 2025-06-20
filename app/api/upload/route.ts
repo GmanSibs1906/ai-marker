@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { extractTextFromPDF, parseFileName, validateFileName } from '@/app/lib/pdf-parser';
+import { parseFileName, validateFileName } from '@/app/lib/pdf-parser';
+import { extractTextFromDocument } from '@/app/lib/document-parser-server';
 
 export async function POST(request: NextRequest) {
   try {
@@ -38,11 +39,15 @@ export async function POST(request: NextRequest) {
         try {
           // Validate file name format
           if (!validateFileName(file.name)) {
-            throw new Error('Invalid file name format. Use: StudentName_AssignmentTitle.pdf');
+            throw new Error('Invalid file name format. Use: StudentName_AssignmentTitle.pdf/doc/docx');
           }
 
           const { studentName, assignmentTitle } = parseFileName(file.name);
-          const extractedText = await extractTextFromPDF(file);
+          
+          // Convert File to Buffer for server-side parsing
+          const arrayBuffer = await file.arrayBuffer();
+          const buffer = Buffer.from(arrayBuffer);
+          const extractedText = await extractTextFromDocument(buffer, file.name);
           
           return {
             id: `file-${index}-${Date.now()}`,

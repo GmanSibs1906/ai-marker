@@ -3,6 +3,8 @@
 import { useState, useRef } from 'react';
 import { UploadedFile } from '../lib/types';
 import { Button } from './ui/Button';
+import { getSupportedFileTypes, getFileTypeDescription } from '../lib/pdf-parser';
+import { validateDocumentBatch, getDocumentSizeCategory } from '../lib/document-utils';
 
 interface FileUploaderProps {
   assessmentType: 'assessment' | 'project';
@@ -15,6 +17,9 @@ export default function FileUploader({ assessmentType, onFilesUploaded, uploaded
   const [error, setError] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const supportedTypes = getSupportedFileTypes();
+  const acceptString = supportedTypes.join(',');
 
   const handleFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
@@ -52,6 +57,16 @@ export default function FileUploader({ assessmentType, onFilesUploaded, uploaded
 
       // Combine with existing files
       const allFiles = [...uploadedFiles, ...newFiles];
+      
+      // Validate batch for document size issues
+      const validation = validateDocumentBatch(allFiles);
+      if (!validation.isValid) {
+        const warningMessage = `⚠️ Document Size Warning:\n${validation.issues.join('\n')}\n\nRecommendations:\n${validation.recommendations.join('\n')}`;
+        console.warn(warningMessage);
+        // Still allow upload but show warning
+        setError(warningMessage);
+      }
+      
       onFilesUploaded(allFiles);
 
       // Show success message if we have successful uploads
@@ -62,7 +77,8 @@ export default function FileUploader({ assessmentType, onFilesUploaded, uploaded
         console.log(`Successfully uploaded ${successCount} file(s)`);
       }
       if (failedCount > 0) {
-        setError(`${failedCount} file(s) failed to upload. Check individual file errors below.`);
+        const existingError = validation.isValid ? '' : `${error}\n\n`;
+        setError(`${existingError}${failedCount} file(s) failed to upload. Check individual file errors below.`);
       }
 
     } catch (error) {
@@ -119,23 +135,23 @@ export default function FileUploader({ assessmentType, onFilesUploaded, uploaded
         <div className="text-sm text-blue-800 space-y-2">
           <p><strong>For SINGLE STUDENT marking:</strong></p>
           <ul className="list-disc list-inside ml-4">
-            <li>Upload 1 PDF file</li>
-            <li>File name format: &quot;StudentName_AssignmentTitle.pdf&quot;</li>
+            <li>Upload 1 document file (PDF, DOC, or DOCX)</li>
+            <li>File name format: &quot;StudentName_AssignmentTitle.pdf/doc/docx&quot;</li>
             <li>Example: &quot;JohnSmith_WebDevelopmentProject.pdf&quot;</li>
           </ul>
           
           <p><strong>For MULTIPLE STUDENTS marking:</strong></p>
           <ul className="list-disc list-inside ml-4">
-            <li>Upload multiple PDF files at once</li>
+            <li>Upload multiple document files at once</li>
             <li>Each file must follow naming convention</li>
-            <li>Examples: &quot;BusisiweNgwane_CVWebpage.pdf&quot;, &quot;JohnDoe_CyberSecurityAssessment.pdf&quot;</li>
+            <li>Examples: &quot;BusisiweNgwane_CVWebpage.docx&quot;, &quot;JohnDoe_CyberSecurityAssessment.pdf&quot;</li>
           </ul>
 
           <p><strong>IMPORTANT RULES:</strong></p>
           <div className="text-sm text-blue-800 space-y-2">
-            <p>• File name format: &quot;StudentName_AssignmentTitle.pdf&quot;</p>
+            <p>• File name format: &quot;StudentName_AssignmentTitle.pdf/doc/docx&quot;</p>
             <p>• Example: &quot;JohnSmith_WebDevelopmentProject.pdf&quot;</p>
-            <p>• Only PDF files accepted</p>
+            <p>• Supported formats: PDF, DOC, DOCX files</p>
             <p>• Max file size: 10MB per file</p>
             <p>• Use underscores (_) to separate name and title</p>
             <p>• No spaces in filenames</p>
@@ -159,7 +175,7 @@ export default function FileUploader({ assessmentType, onFilesUploaded, uploaded
           ref={fileInputRef}
           type="file"
           multiple
-          accept=".pdf"
+          accept={acceptString}
           onChange={handleFileInput}
           className="hidden"
           disabled={isUploading}
@@ -177,7 +193,7 @@ export default function FileUploader({ assessmentType, onFilesUploaded, uploaded
             </div>
           ) : (
             <>
-              <p className="text-lg mb-2">Drop PDF files here or click to browse</p>
+              <p className="text-lg mb-2">Drop {getFileTypeDescription()} here or click to browse</p>
               <p className="text-sm text-gray-400 mb-4">
                 Upload student {assessmentType} files following the naming convention
               </p>
@@ -231,6 +247,26 @@ export default function FileUploader({ assessmentType, onFilesUploaded, uploaded
                 {file.status === 'completed' && (
                   <div className="text-xs text-gray-500 mt-1">
                     Text extracted: {file.extractedText.substring(0, 50)}...
+                  </div>
+                )}
+                
+                {file.status === 'completed' && file.extractedText && (
+                  <div className="text-xs mt-1">
+                    {(() => {
+                      const sizeInfo = getDocumentSizeCategory(file.extractedText);
+                      const colorClass = 
+                        sizeInfo.riskLevel === 'critical' ? 'text-red-600' :
+                        sizeInfo.riskLevel === 'high' ? 'text-orange-600' :
+                        sizeInfo.riskLevel === 'medium' ? 'text-yellow-600' : 'text-green-600';
+                      
+                      return (
+                        <span className={`${colorClass} font-medium`}>
+                          📊 {sizeInfo.description} ({sizeInfo.estimatedTokens.toLocaleString()} tokens)
+                          {sizeInfo.willChunk && ` • Will chunk into ${sizeInfo.estimatedChunks} parts`}
+                          {sizeInfo.riskLevel === 'critical' && ' • ⚠️ TOO LARGE'}
+                        </span>
+                      );
+                    })()}
                   </div>
                 )}
               </div>

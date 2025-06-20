@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from 'react';
 import { Memo } from '../lib/types';
 import { addMemo, getMemosByType, deleteMemo } from '../lib/storage';
 import { Button } from './ui/Button';
+import { getSupportedFileTypes, getFileTypeDescription } from '../lib/pdf-parser';
 
 interface MemoUploaderProps {
   assessmentType: 'assessment' | 'project';
@@ -17,6 +18,9 @@ export default function MemoUploader({ assessmentType, selectedMemo, onMemoSelec
   const [error, setError] = useState<string | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const supportedTypes = getSupportedFileTypes();
+  const acceptString = supportedTypes.join(',');
 
   // Load memos on client side only to prevent SSR hydration issues
   useEffect(() => {
@@ -79,8 +83,6 @@ export default function MemoUploader({ assessmentType, selectedMemo, onMemoSelec
     }
   };
 
-  // formatFileSize function removed as it was unused
-
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -98,7 +100,7 @@ export default function MemoUploader({ assessmentType, selectedMemo, onMemoSelec
       <input
         ref={fileInputRef}
         type="file"
-        accept=".pdf"
+        accept={acceptString}
         onChange={handleFileUpload}
         className="hidden"
       />
@@ -112,11 +114,11 @@ export default function MemoUploader({ assessmentType, selectedMemo, onMemoSelec
       <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
         <h4 className="font-medium text-blue-900 mb-2">📋 MEMO UPLOAD GUIDELINES</h4>
         <ul className="text-sm text-blue-800 space-y-1">
-          <li>• Upload the marking memo/rubric as a PDF file</li>
+          <li>• Upload the marking memo/rubric as {getFileTypeDescription()}</li>
           <li>• The memo should contain expected answers and marking criteria</li>
           <li>• AI will use this memo as the primary reference for marking</li>
           <li>• Maximum file size: 10MB</li>
-          <li>• Only PDF files are accepted</li>
+          <li>• Supported formats: PDF, DOC, DOCX files</li>
         </ul>
       </div>
 

@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { Prompt, UploadedFile, MarkingResult, Memo } from '../lib/types';
+import { getProcessingTimeEstimate, getDocumentSizeCategory } from '../lib/document-utils';
+import { getBatchRecommendation } from '../lib/batch-utils';
 
 interface MarkingInterfaceProps {
   prompt: Prompt | null;
@@ -36,9 +38,10 @@ export default function MarkingInterface({
     status: 'idle',
     logs: []
   });
+  const [markingMode, setMarkingMode] = useState<'local' | 'ai'>('local');
   // Remove unused results state
 
-  const addLog = (message: string) => {
+  const addLog = useCallback((message: string) => {
     const timestamp = new Date().toLocaleTimeString();
     const logMessage = `[${timestamp}] ${message}`;
     console.log(logMessage);
@@ -46,7 +49,7 @@ export default function MarkingInterface({
       ...prev,
       logs: [...prev.logs, logMessage]
     }));
-  };
+  }, []);
 
   const startMarking = useCallback(async () => {
     if (!prompt) {
@@ -54,7 +57,11 @@ export default function MarkingInterface({
       return;
     }
 
-    addLog('🚀 Starting real AI marking process...');
+    if (markingMode === 'local') {
+      addLog('🚀 Starting LOCAL marking process (Zero AI tokens used)...');
+    } else {
+      addLog('🚀 Starting AI marking process...');
+    }
     addLog(`📝 Configuration: ${assessmentType} marking`);
     addLog(`🎯 Prompt: ${prompt.name}`);
     addLog(`📋 Memo: ${memo ? memo.fileName : 'None (using prompt only)'}`);
@@ -65,6 +72,7 @@ export default function MarkingInterface({
 
     const markingResults: MarkingResult[] = [];
 
+    // Process files with better resource management
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       
@@ -76,98 +84,224 @@ export default function MarkingInterface({
 
       addLog(`📝 Processing file ${i + 1}/${files.length}: ${file.studentName} - ${file.assignmentTitle}`);
 
+      // Add AbortController for request timeout and cleanup
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => {
+        controller.abort();
+        addLog(`⏰ Request timeout for ${file.studentName} - will retry`);
+      }, 120000); // 2 minute timeout
+
       try {
-        // Prepare the marking request
-        const requestData = {
-          prompt: prompt.content,
-          documentContent: file.extractedText,
-          assessmentType,
-          memo: memo?.content || undefined,
-          studentName: file.studentName,
-          assignmentTitle: file.assignmentTitle
-        };
+        if (markingMode === 'local') {
+          // Use local marking (zero tokens)
+          addLog(`🏠 Processing locally for ${file.studentName} (No AI tokens used)...`);
+          addLog(`📊 Document length: ${file.extractedText.length} characters`);
+          
+          const response = await fetch('/api/local-mark', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              documentContent: file.extractedText,
+              studentName: file.studentName,
+              assignmentTitle: file.assignmentTitle,
+              memo: memo?.content || undefined
+            })
+          });
+          
+          if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
+            throw new Error(errorData.error || `HTTP ${response.status}`);
+          }
+          
+          const data = await response.json();
+          addLog(`✅ Local marking completed for ${file.studentName}`);
+          addLog(`💰 AI Tokens saved: ~${data.tokensSaved} tokens`);
+          
+          const result: MarkingResult = {
+            studentName: file.studentName,
+            assignmentTitle: file.assignmentTitle,
+            markingContent: data.markingResult,
+            totalMarks: data.totalMarks,
+            percentage: data.percentage,
+            memoUsed: memo?.fileName || 'None',
+            promptUsed: `${prompt.name} (Local Analysis)`,
+            createdAt: new Date(),
+            originalFileName: file.originalFileName,
+            markedFileName: `LOCAL_MARKED_${file.studentName}_${file.assignmentTitle}.pdf`,
+          };
 
-        addLog(`🤖 Sending request to OpenAI API for ${file.studentName}...`);
-        addLog(`📊 Document length: ${file.extractedText.length} characters`);
-        
-        const response = await fetch('/api/openai', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(requestData),
-        });
+          markingResults.push(result);
+          addLog(`✅ Completed local marking for ${file.studentName} (${data.percentage}%)`);
+          
+        } else {
+          // Use AI marking (consumes tokens)
+          const requestData = {
+            prompt: prompt.content,
+            documentContent: file.extractedText,
+            assessmentType,
+            memo: memo?.content || undefined,
+            studentName: file.studentName,
+            assignmentTitle: file.assignmentTitle
+          };
 
-        if (!response.ok) {
-          const errorData = await response.json();
-          throw new Error(errorData.error || `HTTP ${response.status}`);
+          addLog(`🤖 Sending request to OpenAI API for ${file.studentName}...`);
+          addLog(`📊 Document length: ${file.extractedText.length} characters`);
+          
+          // Add retry logic with exponential backoff for network issues
+          let retryCount = 0;
+          const maxRetries = 3;
+          let finalResponse: Response | undefined;
+          
+          while (retryCount <= maxRetries) {
+            try {
+              const response = await fetch('/api/openai', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Connection': 'keep-alive', // Optimize connection reuse
+                },
+                body: JSON.stringify(requestData),
+                signal: controller.signal,
+              });
+              
+              if (response.ok) {
+                finalResponse = response;
+                break; // Success, exit retry loop
+              } else if (response.status === 429) {
+                // Rate limit - wait longer
+                const waitTime = Math.pow(2, retryCount) * 2000 + Math.random() * 1000;
+                addLog(`⏳ Rate limited, waiting ${Math.round(waitTime/1000)}s before retry ${retryCount + 1}/${maxRetries}`);
+                await new Promise(resolve => setTimeout(resolve, waitTime));
+              } else {
+                // Other HTTP error
+                const errorData = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
+                throw new Error(errorData.error || `HTTP ${response.status}`);
+              }
+            } catch (fetchError: unknown) {
+              const error = fetchError as Error;
+              if (error.name === 'AbortError') {
+                throw new Error('Request timeout - document may be too large');
+              }
+              
+              if (retryCount === maxRetries) {
+                throw fetchError;
+              }
+              
+              addLog(`⚠️ Network error (attempt ${retryCount + 1}/${maxRetries + 1}): ${error.message || 'Unknown error'}`);
+              const waitTime = Math.pow(2, retryCount) * 1000;
+              await new Promise(resolve => setTimeout(resolve, waitTime));
+            }
+            
+            retryCount++;
+          }
+
+          clearTimeout(timeoutId);
+
+          if (!finalResponse) {
+            throw new Error('No response received after retries');
+          }
+
+          const data = await finalResponse.json();
+          addLog(`✅ Received response from OpenAI for ${file.studentName}`);
+          addLog(`📝 Response length: ${data.markingResult.length} characters`);
+
+          // Extract marks and percentage from the response if possible
+          const markingContent = data.markingResult;
+          let totalMarks: number | undefined;
+          let percentage: number | undefined;
+
+          // Try to extract percentage from the response
+          const percentageMatch = markingContent.match(/(\d+)%/);
+          if (percentageMatch) {
+            percentage = parseInt(percentageMatch[1]);
+            addLog(`📊 Extracted percentage: ${percentage}%`);
+          }
+
+          // Try to extract total marks
+          const marksMatch = markingContent.match(/(\d+)\/(\d+)/);
+          if (marksMatch) {
+            totalMarks = parseInt(marksMatch[1]);
+            addLog(`📊 Extracted marks: ${totalMarks}/${marksMatch[2]}`);
+          }
+
+          const result: MarkingResult = {
+            studentName: file.studentName,
+            assignmentTitle: file.assignmentTitle,
+            markingContent,
+            totalMarks,
+            percentage,
+            memoUsed: memo?.fileName || 'None',
+            promptUsed: prompt.name,
+            createdAt: new Date(),
+            originalFileName: file.originalFileName,
+            markedFileName: `MARKED_${file.studentName}_${file.assignmentTitle}.pdf`,
+          };
+
+          markingResults.push(result);
+          addLog(`✅ Completed marking for ${file.studentName} ${percentage ? `(${percentage}%)` : '(Score processed)'}`);
+
+          // Clear response data to free memory
+          finalResponse = undefined;
         }
-
-        const data = await response.json();
-        addLog(`✅ Received response from OpenAI for ${file.studentName}`);
-        addLog(`📝 Response length: ${data.markingResult.length} characters`);
-
-        // Extract marks and percentage from the response if possible
-        const markingContent = data.markingResult;
-        let totalMarks: number | undefined;
-        let percentage: number | undefined;
-
-        // Try to extract percentage from the response
-        const percentageMatch = markingContent.match(/(\d+)%/);
-        if (percentageMatch) {
-          percentage = parseInt(percentageMatch[1]);
-          addLog(`📊 Extracted percentage: ${percentage}%`);
-        }
-
-        // Try to extract total marks
-        const marksMatch = markingContent.match(/(\d+)\/(\d+)/);
-        if (marksMatch) {
-          totalMarks = parseInt(marksMatch[1]);
-          addLog(`📊 Extracted marks: ${totalMarks}/${marksMatch[2]}`);
-        }
-
-        const result: MarkingResult = {
-          studentName: file.studentName,
-          assignmentTitle: file.assignmentTitle,
-          markingContent,
-          totalMarks,
-          percentage,
-          memoUsed: memo?.fileName || 'None',
-          promptUsed: prompt.name,
-          createdAt: new Date(),
-        };
-
-        markingResults.push(result);
-        addLog(`✅ Completed marking for ${file.studentName} ${percentage ? `(${percentage}%)` : '(Score processed)'}`);
 
       } catch (error) {
+        clearTimeout(timeoutId);
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
         addLog(`❌ Error marking ${file.studentName}: ${errorMessage}`);
+        
+        // Provide more specific error guidance
+        let errorGuidance = '';
+        if (errorMessage.includes('Document too large') || errorMessage.includes('timeout')) {
+          errorGuidance = '\n\n💡 Suggestion: Try using a shorter document or break it into smaller parts.';
+        } else if (errorMessage.includes('Rate limit')) {
+          errorGuidance = '\n\n💡 Suggestion: The system automatically retries with delays. Please wait.';
+        } else if (errorMessage.includes('API key')) {
+          errorGuidance = '\n\n💡 Suggestion: Check your OpenAI API key configuration.';
+        } else if (errorMessage.includes('Failed to fetch') || errorMessage.includes('ERR_INSUFFICIENT_RESOURCES')) {
+          errorGuidance = '\n\n💡 Suggestion: Browser resource limit reached. Try processing fewer files at once.';
+        } else {
+          errorGuidance = '\n\n💡 The system includes automatic retry logic for temporary issues.';
+        }
         
         // Add error result
         const errorResult: MarkingResult = {
           studentName: file.studentName,
           assignmentTitle: file.assignmentTitle,
-          markingContent: `❌ Error occurred during marking: ${errorMessage}\n\nPlease check your OpenAI API key and try again.`,
+          markingContent: `❌ Error occurred during marking: ${errorMessage}${errorGuidance}`,
           memoUsed: memo?.fileName || 'None',
           promptUsed: prompt.name,
           createdAt: new Date(),
+          originalFileName: file.originalFileName,
+          markedFileName: `ERROR_${file.studentName}_${file.assignmentTitle}.pdf`,
         };
         
         markingResults.push(errorResult);
       }
 
-      // Small delay between requests to avoid rate limiting
+      // Longer delay between requests + garbage collection hint
       if (i < files.length - 1) {
-        addLog('⏳ Waiting 1 second before next request (rate limiting)...');
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        addLog('⏳ Waiting 5 seconds before next request (resource management)...');
+        
+        // Force garbage collection if available (development only)
+        if (typeof window !== 'undefined' && 'gc' in window) {
+          try {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (window as any).gc();
+          } catch {
+            // Ignore if gc is not available
+          }
+        }
+        
+        await new Promise(resolve => setTimeout(resolve, 10000)); // Increased to 10 seconds to account for chunk processing
       }
     }
 
     addLog(`🎉 Marking completed! Successfully processed ${markingResults.length} files`);
     setProgress(prev => ({ ...prev, status: 'completed' }));
     onMarkingComplete(markingResults);
-  }, [prompt, memo, files, assessmentType, onMarkingComplete, onMarkingStart, addLog]);
+  }, [prompt, memo, files, assessmentType, onMarkingComplete, onMarkingStart, addLog, markingMode]);
 
   useEffect(() => {
     // Auto-start marking when component mounts
@@ -180,9 +314,164 @@ export default function MarkingInterface({
 
   return (
     <div className="space-y-6">
+      {/* Marking Mode Selector */}
+      <div className="bg-white border border-gray-200 rounded-lg p-4">
+        <h3 className="text-lg font-semibold text-gray-900 mb-3">Choose Marking Method</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div 
+            className={`p-4 border-2 rounded-lg cursor-pointer transition-all ${
+              markingMode === 'local' 
+                ? 'border-green-500 bg-green-50' 
+                : 'border-gray-200 hover:border-gray-300'
+            }`}
+            onClick={() => setMarkingMode('local')}
+          >
+            <div className="flex items-center mb-2">
+              <input
+                type="radio"
+                checked={markingMode === 'local'}
+                onChange={() => setMarkingMode('local')}
+                className="mr-2"
+              />
+              <h4 className="font-medium text-gray-900">🏠 Local Marking</h4>
+            </div>
+            <p className="text-sm text-gray-600 mb-2">
+              Rule-based analysis using keyword detection and rubric matching
+            </p>
+            <div className="text-xs space-y-1">
+              <div className="flex items-center text-green-600">
+                <span className="mr-1">✅</span>
+                <span>Zero OpenAI tokens used</span>
+              </div>
+              <div className="flex items-center text-green-600">
+                <span className="mr-1">⚡</span>
+                <span>Instant processing</span>
+              </div>
+              <div className="flex items-center text-green-600">
+                <span className="mr-1">💰</span>
+                <span>No API costs</span>
+              </div>
+              <div className="flex items-center text-orange-600">
+                <span className="mr-1">⚠️</span>
+                <span>Basic analysis only</span>
+              </div>
+            </div>
+          </div>
+          
+          <div 
+            className={`p-4 border-2 rounded-lg cursor-pointer transition-all ${
+              markingMode === 'ai' 
+                ? 'border-blue-500 bg-blue-50' 
+                : 'border-gray-200 hover:border-gray-300'
+            }`}
+            onClick={() => setMarkingMode('ai')}
+          >
+            <div className="flex items-center mb-2">
+              <input
+                type="radio"
+                checked={markingMode === 'ai'}
+                onChange={() => setMarkingMode('ai')}
+                className="mr-2"
+              />
+              <h4 className="font-medium text-gray-900">🤖 AI Marking</h4>
+            </div>
+            <p className="text-sm text-gray-600 mb-2">
+              Advanced OpenAI GPT-3.5-turbo analysis with detailed feedback
+            </p>
+            <div className="text-xs space-y-1">
+              <div className="flex items-center text-blue-600">
+                <span className="mr-1">✅</span>
+                <span>Detailed analysis</span>
+              </div>
+              <div className="flex items-center text-blue-600">
+                <span className="mr-1">🧠</span>
+                <span>Context understanding</span>
+              </div>
+              <div className="flex items-center text-red-600">
+                <span className="mr-1">💸</span>
+                <span>Consumes OpenAI tokens</span>
+              </div>
+              <div className="flex items-center text-red-600">
+                <span className="mr-1">⏱️</span>
+                <span>Slower processing</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        {markingMode === 'local' && (
+          <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded-lg">
+            <p className="text-sm text-green-800">
+              <strong>💰 Cost Savings:</strong> Using local marking will save approximately{' '}
+              <strong>{files.reduce((total, file) => total + Math.ceil(file.extractedText.length / 4), 0) + (files.length * 2000)}</strong>{' '}
+              OpenAI tokens (estimated ${((files.reduce((total, file) => total + Math.ceil(file.extractedText.length / 4), 0) + (files.length * 2000)) * 0.000002).toFixed(4)} USD).
+            </p>
+          </div>
+        )}
+      </div>
+      
       <div>
-        <h2 className="text-2xl font-bold text-gray-900 mb-2">🤖 AI Marking in Progress</h2>
-        <p className="text-gray-600">Processing {files.length} student file(s) with OpenAI GPT-4...</p>
+        <h2 className="text-2xl font-bold text-gray-900 mb-2">
+          {markingMode === 'local' ? '🏠 Local Marking in Progress' : '🤖 AI Marking in Progress'}
+        </h2>
+        <p className="text-gray-600">
+          {markingMode === 'local' 
+            ? `Processing ${files.length} student file(s) using local rule-based analysis (Zero AI tokens used)...`
+            : `Processing ${files.length} student file(s) with OpenAI GPT-3.5-turbo (with smart chunking for large documents)...`
+          }
+        </p>
+        
+        {/* Info about chunking for large documents */}
+        {files.some(file => getDocumentSizeCategory(file.extractedText).willChunk) && (
+          <div className="mt-3 bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+            <div className="flex items-start">
+              <svg className="w-5 h-5 text-yellow-600 mr-2 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <div className="text-sm">
+                <p className="font-medium text-yellow-800 mb-1">📄 Large Document Processing</p>
+                            <p className="text-yellow-700">
+              Some of your documents are large and will be processed in chunks for better accuracy. 
+              This may take a bit longer but ensures comprehensive marking within OpenAI&apos;s limits.
+            </p>
+              </div>
+            </div>
+          </div>
+        )}
+        
+        {/* Batch recommendation */}
+        {(() => {
+          const batchRec = getBatchRecommendation(files);
+          const shouldShowRecommendation = batchRec.riskLevel !== 'low' || files.length > batchRec.recommendedBatchSize;
+          
+          if (!shouldShowRecommendation) return null;
+          
+          const bgColor = batchRec.riskLevel === 'high' ? 'bg-red-50 border-red-200' : 'bg-orange-50 border-orange-200';
+          const textColor = batchRec.riskLevel === 'high' ? 'text-red-700' : 'text-orange-700';
+          const titleColor = batchRec.riskLevel === 'high' ? 'text-red-800' : 'text-orange-800';
+          const iconColor = batchRec.riskLevel === 'high' ? 'text-red-600' : 'text-orange-600';
+          
+          return (
+            <div className={`mt-3 ${bgColor} rounded-lg p-3`}>
+              <div className="flex items-start">
+                <svg className={`w-5 h-5 ${iconColor} mr-2 mt-0.5`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.664-.833-2.464 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                </svg>
+                <div className="text-sm">
+                  <p className={`font-medium ${titleColor} mb-1`}>
+                    {batchRec.riskLevel === 'high' ? '🚨 High Resource Risk' : '⚠️ Batch Size Recommendation'}
+                  </p>
+                  <p className={textColor}>
+                    {batchRec.reason}
+                  </p>
+                  <p className={`${textColor} mt-1 font-medium`}>
+                    💡 Recommended: Process {batchRec.recommendedBatchSize} files at a time ({batchRec.totalBatches} batches total)
+                  </p>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
       </div>
 
       {/* Progress indicator */}
@@ -242,8 +531,33 @@ export default function MarkingInterface({
           <p>• Prompt: <strong>{prompt?.name || 'None selected'}</strong></p>
           <p>• Memo: <strong>{memo?.fileName || 'None (using prompt only)'}</strong></p>
           <p>• Files to mark: <strong>{files.length}</strong></p>
-          <p>• OpenAI Model: <strong>GPT-4</strong></p>
+          <p>• OpenAI Model: <strong>GPT-3.5-turbo</strong></p>
+          <p>• Estimated time: <strong>{getProcessingTimeEstimate(files)}</strong></p>
         </div>
+        
+        {/* Document size analysis */}
+        {files.length > 0 && (
+          <div className="mt-3 pt-3 border-t border-blue-200">
+            <h5 className="font-medium text-blue-900 mb-2">📊 Document Analysis</h5>
+            <div className="text-sm text-blue-800 space-y-1">
+              {files.map((file, index) => {
+                const sizeInfo = getDocumentSizeCategory(file.extractedText);
+                return (
+                  <div key={index} className="flex justify-between items-center">
+                    <span>{file.studentName}:</span>
+                    <span className={`font-medium ${
+                      sizeInfo.category === 'large' || sizeInfo.category === 'very-large' 
+                        ? 'text-orange-700' 
+                        : 'text-blue-800'
+                    }`}>
+                      {sizeInfo.description} {sizeInfo.willChunk && '(will chunk)'}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Live logs */}
